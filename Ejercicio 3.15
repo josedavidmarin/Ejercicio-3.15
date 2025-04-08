@@ -1,0 +1,123 @@
+from sly import Lexer, Parser
+
+# ================== LEXER ==================
+class MyLexer(Lexer):
+    tokens = {ID, WHILE, DO, ASSIGN, PLUS, EOF}
+    
+    ignore = ' \t'
+    literals = {';'}  # Ejemplo de carácter literal adicional
+    
+    # Expresiones regulares con mayor precisión
+    ID = r'[a-zA-Z_][a-zA-Z0-9_]*'
+    WHILE = r'\bwhile\b'  # \b para coincidencia exacta
+    DO = r'\bdo\b'
+    ASSIGN = r':='
+    PLUS = r'\+'
+    EOF = r'\$'  # Token para fin de entrada
+    
+    @_(r'\n+')
+    def ignore_newline(self, t):
+        self.lineno += len(t.value)
+
+# ================== PARSER ==================
+class MyParser(Parser):
+    tokens = MyLexer.tokens
+    debugfile = 'parser.out'
+    
+    # Precedencia CORREGIDA (eliminamos WHILE/DO de la lista)
+    precedence = (
+        ('left', PLUS),
+        ('right', ASSIGN),
+    )
+    
+    # Regla inicial CORREGIDA con token EOF
+    @_('E EOF')
+    def S(self, p):
+        return p.E
+    
+    # Reglas con manejo de errores
+    @_('WHILE E DO E')
+    def E(self, p):
+        return ('while_loop', p.E0, p.E1)
+    
+    @_('ID ASSIGN E')
+    def E(self, p):
+        return ('assign', p.ID, p.E)
+    
+    @_('E PLUS E')
+    def E(self, p):
+        return ('add', p.E0, p.E1)
+    
+    @_('ID')
+    def E(self, p):
+        return ('id', p.ID)
+    
+    # Manejo de errores sintácticos
+    def error(self, p):
+        if p:
+            raise SyntaxError(f"Error de sintaxis en línea {p.lineno}, token '{p.value}'")
+        else:
+            raise SyntaxError("Error de sintaxis al final de la entrada")
+
+# ================== FUNCIONES AUXILIARES MEJORADAS ==================
+def main(argv):
+    from rich.table import Table
+    from rich.console import Console
+
+    if len(argv) != 2:
+        raise SystemExit(f'Uso: {argv[0]} <archivo>')
+
+    with open(argv[1], 'r', encoding='utf-8') as f:
+        text = f.read() + '$'  # Añadimos EOF automáticamente
+
+    lex = MyLexer()
+    console = Console()
+    
+    # Tabla de tokens mejorada
+    table = Table(title="Tokens Reconocidos", show_header=True, header_style="bold magenta")
+    table.add_column("Tipo", style="cyan")
+    table.add_column("Valor", style="green")
+    table.add_column("Línea", justify="right", style="yellow")
+
+    try:
+        for tok in lex.tokenize(text):
+            table.add_row(tok.type, tok.value, str(tok.lineno))
+        console.print(table)
+        
+        # Análisis sintáctico
+        parser = MyParser()
+        result = parser.parse(lex.tokenize(text))
+        console.print("\n[bold green]Árbol de sintaxis abstracta (AST):[/]")
+        console.print(result)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+
+def count_conflicts(debug_file='parser.out'):
+    shift_reduce = 0
+    reduce_reduce = 0
+    
+    try:
+        with open(debug_file, 'r') as f:
+            for line in f:
+                if "shift/reduce conflict" in line:
+                    shift_reduce += 1
+                elif "reduce/reduce conflict" in line:
+                    reduce_reduce += 1
+                    
+        print("\n=== CONFLICTOS RESUELTOS ===")
+        print(f"Shift/Reduce: {shift_reduce}")
+        print(f"Reduce/Reduce: {reduce_reduce}")
+        print("(Todos los conflictos deben estar resueltos por precedencia)\n")
+        
+    except FileNotFoundError:
+        print("¡Ejecuta el parser primero para generar parser.out!")
+
+# ================== EJECUCIÓN ==================
+if __name__ == '__main__':
+    import sys
+    try:
+        main(sys.argv)
+        count_conflicts()
+    except KeyboardInterrupt:
+        print("\nProceso cancelado por el usuario")
